@@ -11,6 +11,7 @@
 #define LR 0.1     // Learning rate
 
 
+// Worker functions
 double sigmoid(double x) {
     return 1.0 / (1.0 + exp(-x));
 }
@@ -38,6 +39,7 @@ double compute_loss(double X[N][DIM], const double y[N], double w[DIM]) {
     return loss / N;
 }
 
+// Worker function
 void compute_gradient(double X[N][DIM], const double y[N], double w[DIM], double grad[DIM]) {
 
     // init grad
