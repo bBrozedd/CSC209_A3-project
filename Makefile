@@ -1,24 +1,27 @@
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -Wextra -MMD -MP
+LDFLAGS = -lm
 
 SRC_DIR = src
 BUILD_DIR = build
-TARGET = myprogram
+TARGET = lr
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
 
 .PHONY: all clean
 
-all: $(BUILD_DIR) lr
+all: $(BUILD_DIR) $(TARGET)
 
-lr: $(BUILD_DIR)/minimum_lr.o
-	gcc $(CFLAGS) -o lr $^ -lm
+$(TARGET): $(OBJS)
+	gcc $(OBJS) -o $(TARGET) $(LDFLAGS)
 
-$(BUILD_DIR)/minimum_lr.o: $(SRC_DIR)/minimum_lr.c
-	gcc $(CFLAGS) -c $< -o $@ -lm
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	gcc $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf $(BUILD_DIR) lr
+	rm -rf $(BUILD_DIR) $(TARGET)
+
+-include $(OBJS:.o=.d)
