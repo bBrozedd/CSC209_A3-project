@@ -3,17 +3,17 @@ LDFLAGS = -lm
 
 SRC_DIR = src
 BUILD_DIR = build
-TARGET = lr
+TARGETS = test_model
 
-SRCS = $(wildcard $(SRC_DIR)/*.c)
-OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
+TEST_MODEL_SRCS = $(SRC_DIR)/model.c $(SRC_DIR)/test_model.c
+TEST_MODEL_OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(TEST_MODEL_SRCS))
 
 .PHONY: all clean
 
-all: $(BUILD_DIR) $(TARGET)
+all: $(BUILD_DIR) $(TARGETS)
 
-$(TARGET): $(OBJS)
-	gcc $(OBJS) -o $(TARGET) $(LDFLAGS)
+test_model: $(TEST_MODEL_OBJS)
+	gcc $^ -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	gcc $(CFLAGS) -c $< -o $@
@@ -22,6 +22,6 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET)
+	rm -rf $(BUILD_DIR) $(TARGETS)
 
 -include $(OBJS:.o=.d)
