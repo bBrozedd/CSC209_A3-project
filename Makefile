@@ -1,4 +1,6 @@
-CFLAGS = -Wall -g -Wextra -MMD -MP
+
+PORT = 58800
+CFLAGS = -Wall -g -Wextra -MMD -MP -DPORT=$(PORT)
 LDFLAGS = -lm
 
 SRC_DIR = src

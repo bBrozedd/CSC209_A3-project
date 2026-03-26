@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#define PORT 58800
+
 
 int main() {
     int sock;
