@@ -16,11 +16,11 @@ all: $(BUILD_DIR) $(TARGETS)
 test_model: $(TEST_MODEL_OBJS)
 	gcc $^ -o $@ $(LDFLAGS)
 
-server: $(SRC_DIR)/server.c
-	gcc $(CFLAGS) -o server $<
+server: $(BUILD_DIR)/server.o
+	gcc $^ -o $@ $(LDFLAGS)
 
-worker: $(SRC_DIR)/worker.c
-	gcc $(CFLAGS) -o worker $<
+worker: $(BUILD_DIR)/worker.o
+	gcc $^ -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	gcc $(CFLAGS) -c $< -o $@
