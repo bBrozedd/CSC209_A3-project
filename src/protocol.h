@@ -5,7 +5,8 @@
 #ifndef CSC209_A3_PROJECT_PROTOCOL_H
 #define CSC209_A3_PROJECT_PROTOCOL_H
 
-#define DIM 10 // Fixed dimension for feature
+#define DIM 3 // Fixed dimension for feature
+#define PORT 58800
 
 typedef enum {
     PARAM = 1,
@@ -25,5 +26,10 @@ typedef struct {
     int n_samples;
 
 } Message;
+
+typedef struct {
+    double weight[DIM];
+    double loss;
+} Model;
 
 #endif //CSC209_A3_PROJECT_PROTOCOL_H

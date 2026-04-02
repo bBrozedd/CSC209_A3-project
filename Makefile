@@ -21,7 +21,7 @@ test_model: $(TEST_MODEL_OBJS)
 server: $(BUILD_DIR)/server.o
 	gcc $^ -o $@ $(LDFLAGS)
 
-worker: $(BUILD_DIR)/worker.o
+worker: $(BUILD_DIR)/worker.o $(BUILD_DIR)/model.o
 	gcc $^ -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
