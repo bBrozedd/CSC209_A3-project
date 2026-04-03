@@ -58,6 +58,10 @@ int accept_workers(int server_fd, int worker_fds[]) {
 
     while (num_workers < MAX_WORKERS) {
         int client_fd = accept(server_fd, NULL, NULL); // Client address?
+        if (client_fd == -1) {
+            perror("accept");
+            continue;
+        }
         worker_fds[num_workers] = client_fd;
         printf("[Server] Worker %d connected\n", num_workers);
         num_workers++;
@@ -112,7 +116,17 @@ int train_loop(int worker_fds[], int num_workers, Model *model) {
                 }
             }
 
-            select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            int ready;
+            // retry select if a signal interruption occurs
+            do {
+                ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            } while (ready == -1 && errno == EINTR);
+
+            // handle other (non-EINTR) errors
+            if (ready == -1) {
+                perror("select");
+                exit(1);
+            }
 
             for (int i = 0; i < num_workers; i++) {
                 if (!responded[i] && FD_ISSET(worker_fds[i], &read_fds)) {
@@ -196,6 +210,10 @@ int main() {
 
     // socket
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("socket");
+        return(1);
+    }
 
     // allow local addresses to be reused by setting socket option
     int opt = 1;
@@ -207,10 +225,18 @@ int main() {
     address.sin_port = htons(PORT);
     address.sin_addr.s_addr = INADDR_ANY;
 
-    bind(server_fd, (struct sockaddr *)&address, addrlen);
+    if (bind(server_fd, (struct sockaddr *)&address, addrlen) == -1) {
+        perror("bind");
+        close(server_fd);
+        exit(1);
+    }
 
     // listen
-    listen(server_fd, 3);
+    if (listen(server_fd, 3) == -1) {
+        perror("listen");
+        close(server_fd);
+        exit(1);
+    }
     printf("[Server] listening on port %d\n", PORT);
 
     // accept workers

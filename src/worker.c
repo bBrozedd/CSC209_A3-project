@@ -57,6 +57,10 @@ int main() {
 
     // socket
     sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        perror("socket");
+        return(1);
+    }
 
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
@@ -65,13 +69,17 @@ int main() {
     inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
 
     // connect
-    connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("connect");
+        close(sock);
+        exit(1);
+    };
 
     // load data (random sample)
     double features[SAMPLE_SIZE * DIM];
     double labels[SAMPLE_SIZE];
     int n_samples = load_data(features, labels);
-    
+
     // training loop
     while (1) {
         Message msg;
@@ -92,7 +100,7 @@ int main() {
             }
             printf("\n");
             break;
-        } 
+        }
 
         if (msg.type == PARAM) {
 
@@ -105,7 +113,7 @@ int main() {
 
             compute_gradient(features, labels, weight, gradient, n_samples, DIM);
             loss = compute_loss(features, labels, weight, n_samples, DIM);
-            
+
             printf("[Worker] loss: %.6f\n", loss);
 
             // Prepare reply message
@@ -122,8 +130,8 @@ int main() {
                 break;
             }
 
-        } 
-        
+        }
+
         else {
             printf("[Worker] Unknown message type from server: %d\n", msg.type);
             break;
