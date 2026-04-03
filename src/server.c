@@ -10,6 +10,7 @@
 
 #include "protocol.h"
 #include <sys/select.h>
+#include <sys/socket.h>
 
 #define MAX_WORKERS 1
 #define LR 0.1
@@ -79,7 +80,7 @@ int train_loop(int worker_fds[], int num_workers, Model *model) {
         for (int j = 0; j < DIM; j++) {
             msg.weight[j] = weight[j];
         }
-        
+
         for (int i = 0; i < num_workers; i++) {
             if (send_all(worker_fds[i], &msg, sizeof(msg)) < 0) {
                 printf("[Server] Failed to send message to worker %d\n", i);
@@ -196,6 +197,10 @@ int main() {
     // socket
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
 
+    // allow local addresses to be reused by setting socket option
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     // bind
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
@@ -235,5 +240,5 @@ int main() {
         printf("[Server] Failed to close server socket\n");
     }
     printf("[Server] shutdown\n");
-    
+
 }
