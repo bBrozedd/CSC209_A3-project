@@ -51,7 +51,12 @@ int send_all(int server_fd, void *buf, size_t len) {
     return 0;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("[Worker] Usage: ./worker <server_ip>");
+        exit(1);
+    }
+
     int sock;
     struct sockaddr_in serv_addr;
 
@@ -66,7 +71,10 @@ int main() {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
 
-    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    if (inet_pton(AF_INET, argv[1], &serv_addr.sin_addr) != 1) {
+        printf("[Worker] Invalid server IP address");
+        exit(1);
+    }
 
     // connect
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
