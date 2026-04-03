@@ -13,7 +13,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
-#define MAX_WORKERS 1
+#define MAX_WORKERS 3
 #define LR 0.1
 #define MAX_ITER 100
 #define LOSS_THRESHOLD 0.01

@@ -13,10 +13,43 @@
 
 #define SAMPLE_SIZE 100
 
-int load_data(double *features, double *labels) {
-    // For simplicity, we generate random data here.
-    // In a real implementation, you would load data from a file or database.
+/*
+ * Load data from a CSV partition
+ */
+int load_data(const char *filename, double *features, double *labels) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        perror("fopen");
+        return -1;
+    }
 
+    int i = 0;
+    int flag = 1;
+    while (i < SAMPLE_SIZE && flag) {
+        for (int j = 0; j < DIM && flag; j++) {
+            if (fscanf(fp, "%lf,", &features[i * DIM + j]) != 1) {
+                flag = 0;
+            }
+        }
+
+        if (flag && fscanf(fp, "%lf", &labels[i]) != 1) {
+            flag = 0;
+        }
+
+        // increment i if a valid sample was read to maintain sample size tracking
+        if (flag) {
+            i++;
+        }
+    }
+    fclose(fp);
+
+    return i; // sample size
+}
+
+/**
+ * Load generated data for testing
+ */
+int load_generated_data(double *features, double *labels) {
     for (int i = 0; i < SAMPLE_SIZE; i++) {
         for (int j = 0; j < DIM; j++) {
             features[i * DIM + j] = rand() / (double)RAND_MAX;
@@ -52,8 +85,8 @@ int send_all(int server_fd, void *buf, size_t len) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("[Worker] Usage: ./worker <server_ip>");
+    if (argc < 3) {
+        printf("[Worker] Usage: ./worker <server_ip> <data_file.csv>");
         exit(1);
     }
 
@@ -86,7 +119,7 @@ int main(int argc, char *argv[]) {
     // load data (random sample)
     double features[SAMPLE_SIZE * DIM];
     double labels[SAMPLE_SIZE];
-    int n_samples = load_data(features, labels);
+    int n_samples = load_data(argv[2], features, labels);
 
     // training loop
     while (1) {
