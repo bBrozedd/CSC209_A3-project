@@ -6,7 +6,6 @@
 #define CSC209_A3_PROJECT_PROTOCOL_H
 
 #define DIM 3 // Fixed dimension for feature
-#ifndef PORT 58800
 
 typedef enum {
     PARAM = 1,
