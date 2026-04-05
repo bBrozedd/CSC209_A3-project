@@ -17,7 +17,7 @@ The implementation matches a bulk synchronous parallel (BSP) design:
 - Training style: synchronous data-parallel training
 - Communication: TCP sockets
 - Server concurrency model: single-threaded `select()` loop
-- Number of workers: fixed at `3` in [`src/server.c`](/home/brozed/CSC209_A3-project/src/server.c)
+- Number of workers: runtime parameter to [`src/server.c`](/home/brozed/CSC209_A3-project/src/server.c), default `3`
 - Feature dimension: fixed at `3` in [`src/protocol.h`](/home/brozed/CSC209_A3-project/src/protocol.h)
   This corresponds to `bias, x1, x2`
 - Worker sample capacity: fixed at `100` rows per worker in [`src/worker.c`](/home/brozed/CSC209_A3-project/src/worker.c)
@@ -25,7 +25,7 @@ The implementation matches a bulk synchronous parallel (BSP) design:
 ## Repository Layout
 
 - [`Makefile`](/home/brozed/CSC209_A3-project/Makefile): build rules for `server`, `worker`, and `test_model`
-- [`run.sh`](/home/brozed/CSC209_A3-project/run.sh): demo script that generates CSV partitions and launches one server plus three workers
+- [`run.sh`](/home/brozed/CSC209_A3-project/run.sh): demo script that generates CSV partitions and launches one server plus a configurable number of workers
 - [`src/model.c`](/home/brozed/CSC209_A3-project/src/model.c): logistic regression math
 - [`src/model.h`](/home/brozed/CSC209_A3-project/src/model.h): model function declarations
 - [`src/protocol.h`](/home/brozed/CSC209_A3-project/src/protocol.h): shared message and model structs
@@ -77,9 +77,16 @@ This prints the gradient for a tiny hard-coded example from [`src/test_model.c`]
 
 ### 2. Distributed training demo
 
-Start by ensuring the compiled port matches the runtime port.
+[`run.sh`](/home/brozed/CSC209_A3-project/run.sh) uses the same port compiled into `server` and `worker` by the `Makefile`, so there is no separate runtime port setting in the script.
 
-Important: [`run.sh`](/home/brozed/CSC209_A3-project/run.sh) uses port `58800`, but the default `Makefile` port is `4242`. To use the script as written:
+Default build and demo:
+
+```bash
+make
+./run.sh
+```
+
+Build and run on a custom port:
 
 ```bash
 make clean
@@ -87,11 +94,17 @@ make PORT=58800
 ./run.sh
 ```
 
+Or specify a different worker count:
+
+```bash
+./run.sh 5
+```
+
 The script will:
 
-1. generate three CSV partitions in `test_data_large/`
+1. generate `N_WORKERS` CSV partitions in `test_data_large/`
 2. start the server
-3. start three workers
+3. start `N_WORKERS` workers
 4. wait for training to finish
 5. print the tail of the server and worker logs
 
@@ -107,7 +120,7 @@ make PORT=4242
 In one terminal:
 
 ```bash
-./server
+./server 3
 ```
 
 In three separate terminals:
@@ -118,7 +131,7 @@ In three separate terminals:
 ./worker 127.0.0.1 path/to/data_3.csv
 ```
 
-The server waits until all three workers connect before beginning training.
+The server waits until the requested number of workers connect before beginning training.
 
 ## Data Format
 
@@ -175,12 +188,11 @@ Per iteration:
 
 ## Known Limitations
 
-- worker count is hard-coded to `3`
 - feature dimension is hard-coded to `3`
 - worker sample capacity is fixed at `100`
 - messages are exchanged as raw C structs, so portability across different architectures is limited
 - gradients from workers are summed directly; there is no explicit normalization by number of workers at the server
-- no command-line configuration for learning rate, thresholds, or worker count
+- no command-line configuration for learning rate or stopping thresholds
 
 ## Verification
 

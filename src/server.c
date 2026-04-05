@@ -14,12 +14,9 @@
 
 #include "protocol.h"
 
-#define MAX_WORKERS 3
 #define LR 1
 #define MAX_ITER 10000
 #define LOSS_THRESHOLD 0.05
-
-static int worker_fds[MAX_WORKERS];
 
 static int recv_all(int fd, void *buf, size_t len) {
     size_t total = 0;
@@ -49,17 +46,17 @@ static int send_all(int fd, const void *buf, size_t len) {
 }
 
 
-static void close_worker(int i) {
+static void close_worker(int *worker_fds, int i) {
     if (worker_fds[i] >= 0) {
         close(worker_fds[i]);
         worker_fds[i] = -1;
     }
 }
 
-static int accept_workers(int server_fd) {
+static int accept_workers(int server_fd, int num_workers, int *worker_fds) {
     int count = 0;
 
-    while (count < MAX_WORKERS) {
+    while (count < num_workers) {
         int fd = accept(server_fd, NULL, NULL);
         if (fd < 0) {
             if (errno == EINTR) continue;
@@ -75,9 +72,16 @@ static int accept_workers(int server_fd) {
     return count;
 }
 
-static int train_loop(int num_workers, Model *model) {
-    int active[MAX_WORKERS];
-    int responded[MAX_WORKERS];
+static int train_loop(int num_workers, int *worker_fds, Model *model) {
+    int *active = calloc((size_t)num_workers, sizeof(int));
+    int *responded = calloc((size_t)num_workers, sizeof(int));
+    if (!active || !responded) {
+        free(active);
+        free(responded);
+        perror("calloc");
+        return -1;
+    }
+
     int active_count = num_workers;
 
     for (int i = 0; i < num_workers; i++) {
@@ -103,7 +107,7 @@ static int train_loop(int num_workers, Model *model) {
 
             if (send_all(worker_fds[i], &msg, sizeof(msg)) < 0) {
                 printf("[Server] Worker %d disconnected\n", i);
-                close_worker(i);
+                close_worker(worker_fds, i);
                 active[i] = 0;
                 active_count--;
             }
@@ -147,7 +151,7 @@ static int train_loop(int num_workers, Model *model) {
                 Message msg;
                 if (recv_all(worker_fds[i], &msg, sizeof(msg)) < 0) {
                     printf("[Server] Worker %d disconnected\n", i);
-                    close_worker(i);
+                    close_worker(worker_fds, i);
                     active[i] = 0;
                     active_count--;
                     pending--;
@@ -171,7 +175,11 @@ static int train_loop(int num_workers, Model *model) {
             }
         }
 
-        if (total_samples == 0) return -1;
+        if (total_samples == 0) {
+            free(active);
+            free(responded);
+            return -1;
+        }
 
         double avg_loss = total_loss / total_samples;
 
@@ -190,14 +198,32 @@ static int train_loop(int num_workers, Model *model) {
         }
     }
 
+    free(active);
+    free(responded);
     return 0;
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     int server_fd;
     struct sockaddr_in addr;
+    int num_workers = 3;
+    int *worker_fds = NULL;
 
-    for (int i = 0; i < MAX_WORKERS; i++) {
+    if (argc >= 2) {
+        num_workers = atoi(argv[1]);
+        if (num_workers <= 0) {
+            fprintf(stderr, "Usage: %s [num_workers]\n", argv[0]);
+            return 1;
+        }
+    }
+
+    worker_fds = malloc(sizeof(int) * (size_t)num_workers);
+    if (!worker_fds) {
+        perror("malloc");
+        return 1;
+    }
+
+    for (int i = 0; i < num_workers; i++) {
         worker_fds[i] = -1;
     }
 
@@ -220,20 +246,23 @@ int main(void) {
         return 1;
     }
 
-    if (listen(server_fd, MAX_WORKERS) < 0) {
+    if (listen(server_fd, num_workers) < 0) {
         perror("listen");
+        free(worker_fds);
         return 1;
     }
 
-    printf("[Server] Listening on port %d\n", PORT);
+    printf("[Server] Listening on port %d for %d workers\n", PORT, num_workers);
 
-    int num_workers = accept_workers(server_fd);
-    if (num_workers < 0) return 1;
+    if (accept_workers(server_fd, num_workers, worker_fds) < 0) {
+        free(worker_fds);
+        return 1;
+    }
 
     Model model;
     memset(&model, 0, sizeof(model));
 
-    if (train_loop(num_workers, &model) < 0) {
+    if (train_loop(num_workers, worker_fds, &model) < 0) {
         printf("[Server] Training failed\n");
     } else {
         printf("[Server] Training done. Final loss: %f\n", model.loss);
@@ -256,11 +285,12 @@ int main(void) {
             msg.loss = model.loss;
 
             send_all(worker_fds[i], &msg, sizeof(msg));
-            close_worker(i);
+            close_worker(worker_fds, i);
         }
     }
 
     close(server_fd);
+    free(worker_fds);
     printf("[Server] shutdown\n");
     return 0;
 }
