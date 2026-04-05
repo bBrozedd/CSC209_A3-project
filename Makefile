@@ -1,5 +1,5 @@
 
-PORT = 58800
+PORT = 4242
 CFLAGS = -Wall -g -Wextra -MMD -MP -DPORT=$(PORT)
 LDFLAGS = -lm
 
