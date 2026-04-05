@@ -15,9 +15,9 @@
 #include "protocol.h"
 
 #define MAX_WORKERS 3
-#define LR 0.1
-#define MAX_ITER 100
-#define LOSS_THRESHOLD 0.01
+#define LR 1
+#define MAX_ITER 10000
+#define LOSS_THRESHOLD 0.05
 
 static int worker_fds[MAX_WORKERS];
 
