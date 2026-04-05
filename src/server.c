@@ -1,40 +1,33 @@
 //
-// Created by User on 2026/3/25.
+// server.c
 //
 
-#include <stdio.h>
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-
-#include "protocol.h"
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <unistd.h>
+
+#include "protocol.h"
 
 #define MAX_WORKERS 3
 #define LR 0.1
 #define MAX_ITER 100
 #define LOSS_THRESHOLD 0.01
 
-int worker_fds[MAX_WORKERS] = {0};
+static int worker_fds[MAX_WORKERS];
 
-double weight[DIM];
-
-double global_gradient[DIM];
-double global_loss;
-int total_samples;
-
-int responded[MAX_WORKERS];
-int num_responded;
-
-int recv_all(int client_fd, void *buf, size_t len) {
+static int recv_all(int fd, void *buf, size_t len) {
     size_t total = 0;
-
     while (total < len) {
-        int n = recv(client_fd, buf + total, len - total, 0);
-        if (n <= 0) {
+        ssize_t n = recv(fd, (char *)buf + total, len - total, 0);
+        if (n == 0) return -1;
+        if (n < 0) {
+            if (errno == EINTR) continue;
             return -1;
         }
         total += n;
@@ -42,11 +35,12 @@ int recv_all(int client_fd, void *buf, size_t len) {
     return 0;
 }
 
-int send_all(int client_fd, void *buf, size_t len) {
+static int send_all(int fd, const void *buf, size_t len) {
     size_t total = 0;
     while (total < len) {
-        int n = send(client_fd, buf + total, len - total, 0);
+        ssize_t n = send(fd, (const char *)buf + total, len - total, 0);
         if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
             return -1;
         }
         total += n;
@@ -54,62 +48,84 @@ int send_all(int client_fd, void *buf, size_t len) {
     return 0;
 }
 
-int accept_workers(int server_fd, int worker_fds[]) {
-    int num_workers = 0;
 
-    while (num_workers < MAX_WORKERS) {
-        int client_fd = accept(server_fd, NULL, NULL); // Client address?
-        if (client_fd == -1) {
+static void close_worker(int i) {
+    if (worker_fds[i] >= 0) {
+        close(worker_fds[i]);
+        worker_fds[i] = -1;
+    }
+}
+
+static int accept_workers(int server_fd) {
+    int count = 0;
+
+    while (count < MAX_WORKERS) {
+        int fd = accept(server_fd, NULL, NULL);
+        if (fd < 0) {
+            if (errno == EINTR) continue;
             perror("accept");
-            continue;
+            return -1;
         }
-        worker_fds[num_workers] = client_fd;
-        printf("[Server] Worker %d connected\n", num_workers);
-        num_workers++;
+
+        worker_fds[count] = fd;
+        printf("[Server] Worker %d connected\n", count);
+        count++;
     }
-    return num_workers;
+
+    return count;
 }
 
-int train_loop(int worker_fds[], int num_workers, Model *model) {
-    double weight[DIM] = {0};
+static int train_loop(int num_workers, Model *model) {
+    int active[MAX_WORKERS];
+    int responded[MAX_WORKERS];
+    int active_count = num_workers;
 
-    int iteration = 0;
+    for (int i = 0; i < num_workers; i++) {
+        active[i] = 1;
+    }
 
-    while (iteration < MAX_ITER) {
+    for (int iter = 0; iter < MAX_ITER && active_count > 0; iter++) {
 
-        // Broadcast
-        Message msg;
-        memset(&msg, 0, sizeof(msg));
-        msg.type = PARAM;
-
-        for (int j = 0; j < DIM; j++) {
-            msg.weight[j] = weight[j];
+        // reset response tracking
+        for (int i = 0; i < num_workers; i++) {
+            responded[i] = 0;
         }
 
+        // broadcast PARAM
         for (int i = 0; i < num_workers; i++) {
+            if (!active[i]) continue;
+
+            Message msg;
+            memset(&msg, 0, sizeof(msg));
+            msg.type = PARAM;
+
+            memcpy(msg.weight, model->weight, sizeof(model->weight));
+
             if (send_all(worker_fds[i], &msg, sizeof(msg)) < 0) {
-                printf("[Server] Failed to send message to worker %d\n", i);
-                exit(1);
+                printf("[Server] Worker %d disconnected\n", i);
+                close_worker(i);
+                active[i] = 0;
+                active_count--;
             }
         }
 
-        // reset aggregation
-        memset(&global_gradient, 0, sizeof(global_gradient));
-        global_loss = 0;
-        total_samples = 0;
+        if (active_count == 0) break;
 
-        memset(responded, 0, sizeof(responded));
-        num_responded = 0;
+        // collect gradients using select()
+        double sum_grad[DIM] = {0};
+        double total_loss = 0.0;
+        int total_samples = 0;
 
-        // collect gradient
-        while (num_responded < num_workers) {
+        int pending = active_count;
 
+        while (pending > 0) {
             fd_set read_fds;
             FD_ZERO(&read_fds);
 
             int max_fd = -1;
+
             for (int i = 0; i < num_workers; i++) {
-                if (!responded[i]) {
+                if (active[i] && !responded[i]) {
                     FD_SET(worker_fds[i], &read_fds);
                     if (worker_fds[i] > max_fd) {
                         max_fd = worker_fds[i];
@@ -117,155 +133,134 @@ int train_loop(int worker_fds[], int num_workers, Model *model) {
                 }
             }
 
-            int ready;
-            // retry select if a signal interruption occurs
-            do {
-                ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-            } while (ready == -1 && errno == EINTR);
-
-            // handle other (non-EINTR) errors
-            if (ready == -1) {
+            int ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            if (ready < 0) {
+                if (errno == EINTR) continue;
                 perror("select");
-                exit(1);
+                return -1;
             }
 
             for (int i = 0; i < num_workers; i++) {
-                if (!responded[i] && FD_ISSET(worker_fds[i], &read_fds)) {
-                    Message recv_msg;
-                    memset(&recv_msg, 0, sizeof(recv_msg));
-                    if (recv_all(worker_fds[i], &recv_msg, sizeof(recv_msg)) < 0) {
-                        printf("[Server] Failed to receive message from worker %d\n", i);
-                        exit(1);
-                    }
+                if (!active[i] || responded[i]) continue;
+                if (!FD_ISSET(worker_fds[i], &read_fds)) continue;
 
-                    if (recv_msg.type != SEND_GRAD) {
-                        printf("[Server] Unexpected message type from worker %d\n", i);
-                        continue;
-                    }
-
-                    if (recv_msg.type == SEND_GRAD) {
-                        for (int j = 0; j < DIM; j++) {
-                            global_gradient[j] += recv_msg.gradient[j];
-                        }
-                        global_loss += recv_msg.loss * recv_msg.n_samples;
-                        total_samples += recv_msg.n_samples;
-
-                        responded[i] = 1;
-                        num_responded++;
-                    }
+                Message msg;
+                if (recv_all(worker_fds[i], &msg, sizeof(msg)) < 0) {
+                    printf("[Server] Worker %d disconnected\n", i);
+                    close_worker(i);
+                    active[i] = 0;
+                    active_count--;
+                    pending--;
+                    continue;
                 }
+
+                if (msg.type != SEND_GRAD) {
+                    printf("[Server] Invalid message type\n");
+                    continue;
+                }
+
+                for (int j = 0; j < DIM; j++) {
+                    sum_grad[j] += msg.gradient[j];
+                }
+
+                total_loss += msg.loss * msg.n_samples;
+                total_samples += msg.n_samples;
+
+                responded[i] = 1;
+                pending--;
             }
         }
 
-        global_loss /= total_samples;
+        if (total_samples == 0) return -1;
 
-        printf("[Server] Iteration %d: Loss = %f\n", iteration, global_loss);
+        double avg_loss = total_loss / total_samples;
 
-        // Update weight
-        double lr = LR;
+        printf("[Server] Iter %d: loss = %f\n", iter, avg_loss);
 
+        // update model
         for (int j = 0; j < DIM; j++) {
-            weight[j] -= lr * global_gradient[j];
+            model->weight[j] -= LR * sum_grad[j];
         }
 
-        // Stop condition
-        if (global_loss < LOSS_THRESHOLD) {
-            printf("[Server] Loss below threshold. Stopping training.\n");
+        model->loss = avg_loss;
+
+        if (avg_loss < LOSS_THRESHOLD) {
+            printf("[Server] Converged.\n");
             break;
-        }
-
-        iteration++;
-    }
-
-    // Fill final model
-    model->loss = global_loss;
-    for (int j = 0; j < DIM; j++) {
-        model->weight[j] = weight[j];
-    }
-
-    // Broadcast train done and final model
-    Message done_msg;
-    memset(&done_msg, 0, sizeof(done_msg));
-    done_msg.type = TRAIN_DONE;
-    done_msg.loss = global_loss;
-
-    for (int j = 0; j < DIM; j++) {
-        done_msg.weight[j] = weight[j];
-    }
-
-    for (int i = 0; i < num_workers; i++) {
-        if (send_all(worker_fds[i], &done_msg, sizeof(done_msg)) < 0) {
-            printf("[Server] Failed to send done message to worker %d\n", i);
-            exit(1);
         }
     }
 
     return 0;
 }
 
-int main() {
-    int server_fd = 0;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
+int main(void) {
+    int server_fd;
+    struct sockaddr_in addr;
 
-
-    // socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        perror("socket");
-        return(1);
+    for (int i = 0; i < MAX_WORKERS; i++) {
+        worker_fds[i] = -1;
     }
 
-    // allow local addresses to be reused by setting socket option
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // bind
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons(PORT);
-    address.sin_addr.s_addr = INADDR_ANY;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(server_fd, (struct sockaddr *)&address, addrlen) == -1) {
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("bind");
-        close(server_fd);
-        exit(1);
+        return 1;
     }
 
-    // listen
-    if (listen(server_fd, 3) == -1) {
+    if (listen(server_fd, MAX_WORKERS) < 0) {
         perror("listen");
-        close(server_fd);
-        exit(1);
+        return 1;
     }
-    printf("[Server] listening on port %d\n", PORT);
 
-    // accept workers
-    int num_workers = accept_workers(server_fd, worker_fds);
-    printf("[Server] after accept\n");
+    printf("[Server] Listening on port %d\n", PORT);
 
-    // train loop (and broadcast final model to workers)
-    Model final_model;
-    memset(&final_model, 0, sizeof(final_model));
-    train_loop(worker_fds, num_workers, &final_model);
+    int num_workers = accept_workers(server_fd);
+    if (num_workers < 0) return 1;
 
-    // Print final model
-    printf("[Server] Training done. Final loss: %f\n", final_model.loss);
-    printf("[Server] Final weight: ");
-    for (int j = 0; j < DIM; j++) {
-        printf("%f ", final_model.weight[j]);
+    Model model;
+    memset(&model, 0, sizeof(model));
+
+    if (train_loop(num_workers, &model) < 0) {
+        printf("[Server] Training failed\n");
+    } else {
+        printf("[Server] Training done. Final loss: %f\n", model.loss);
+
+        printf("[Server] Final weight: ");
+        for (int i = 0; i < DIM; i++) {
+            printf("%f ", model.weight[i]);
+        }
+        printf("\n");
     }
-    printf("\n");
 
-    // close connections
+    // send TRAIN_DONE
     for (int i = 0; i < num_workers; i++) {
-        if (close(worker_fds[i]) < 0) {
-            printf("[Server] Failed to close connection with worker %d\n", i);
+        if (worker_fds[i] >= 0) {
+            Message msg;
+            memset(&msg, 0, sizeof(msg));
+            msg.type = TRAIN_DONE;
+
+            memcpy(msg.weight, model.weight, sizeof(model.weight));
+            msg.loss = model.loss;
+
+            send_all(worker_fds[i], &msg, sizeof(msg));
+            close_worker(i);
         }
     }
-    if (close(server_fd) < 0) {
-        printf("[Server] Failed to close server socket\n");
-    }
-    printf("[Server] shutdown\n");
 
+    close(server_fd);
+    printf("[Server] shutdown\n");
+    return 0;
 }
