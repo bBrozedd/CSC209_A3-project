@@ -5,30 +5,35 @@
 set -euo pipefail
 
 # Run this from the project root after `make`
-# It generates 3 larger CSV partitions, starts the server, then starts 3 workers.
+# It generates CSV partitions, starts the server, then starts that many workers.
 
-PORT=58800
+
 SERVER_IP="127.0.0.1"
-N_WORKERS=3
+N_WORKERS="${1:-3}"
 SAMPLES_PER_WORKER=5000
 OUT_DIR="test_data_large"
+
+if ! [[ "$N_WORKERS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Usage: $0 [num_workers]"
+    exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 rm -f "$OUT_DIR"/data_*.csv "$OUT_DIR"/server.log "$OUT_DIR"/worker_*.log
 
-python3 - <<'PY'
+N_WORKERS="$N_WORKERS" SAMPLES_PER_WORKER="$SAMPLES_PER_WORKER" OUT_DIR="$OUT_DIR" python3 - <<'PY'
 import csv
 import os
 import random
 from pathlib import Path
 
-out_dir = Path("test_data_large")
+out_dir = Path(os.environ["OUT_DIR"])
 out_dir.mkdir(exist_ok=True)
 
 random.seed(209)
 
-n_workers = 3
-samples_per_worker = 5000
+n_workers = int(os.environ["N_WORKERS"])
+samples_per_worker = int(os.environ["SAMPLES_PER_WORKER"])
 
 for worker_id in range(1, n_workers + 1):
     path = out_dir / f"data_{worker_id}.csv"
@@ -53,35 +58,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Starting server..."
-./server > "$OUT_DIR/server.log" 2>&1 &
+echo "Starting server for $N_WORKERS workers..."
+./server "$N_WORKERS" > "$OUT_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 
 sleep 1
 
 echo "Starting workers..."
-./worker "$SERVER_IP" "$OUT_DIR/data_1.csv" > "$OUT_DIR/worker_1.log" 2>&1 &
-W1=$!
-./worker "$SERVER_IP" "$OUT_DIR/data_2.csv" > "$OUT_DIR/worker_2.log" 2>&1 &
-W2=$!
-./worker "$SERVER_IP" "$OUT_DIR/data_3.csv" > "$OUT_DIR/worker_3.log" 2>&1 &
-W3=$!
+worker_pids=()
+for worker_id in $(seq 1 "$N_WORKERS"); do
+    ./worker "$SERVER_IP" "$OUT_DIR/data_${worker_id}.csv" > "$OUT_DIR/worker_${worker_id}.log" 2>&1 &
+    worker_pids+=("$!")
+done
 
-wait "$W1" "$W2" "$W3"
+for pid in "${worker_pids[@]}"; do
+    wait "$pid"
+done
 wait "$SERVER_PID"
 
 echo
 echo "=== Server log (last 20 lines) ==="
 tail -n 20 "$OUT_DIR/server.log" || true
 
-echo
-echo "=== Worker 1 log (last 10 lines) ==="
-tail -n 10 "$OUT_DIR/worker_1.log" || true
-
-echo
-echo "=== Worker 2 log (last 10 lines) ==="
-tail -n 10 "$OUT_DIR/worker_2.log" || true
-
-echo
-echo "=== Worker 3 log (last 10 lines) ==="
-tail -n 10 "$OUT_DIR/worker_3.log" || true
+for worker_id in $(seq 1 "$N_WORKERS"); do
+    echo
+    echo "=== Worker ${worker_id} log (last 10 lines) ==="
+    tail -n 10 "$OUT_DIR/worker_${worker_id}.log" || true
+done
