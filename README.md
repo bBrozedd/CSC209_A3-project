@@ -24,9 +24,9 @@ The implementation matches a bulk synchronous parallel (BSP) design:
 
 ### Architecture Diagram
 
-![Distributed logistic regression architecture](docs/architecture-diagram.svg)
+<img width="1888" height="3435" alt="image" src="https://github.com/user-attachments/assets/36727ad9-1093-4715-9bd8-8cde89c2700b" />
 
-The diagram is also available directly at [`docs/architecture-diagram.svg`](/home/brozed/CSC209_A3-project/docs/architecture-diagram.svg).
+The previous iteration of the diagram is available at [`docs/architecture-diagram.svg`](/home/brozed/CSC209_A3-project/docs/architecture-diagram.svg).
 
 ## Repository Layout
 
