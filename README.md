@@ -22,6 +22,12 @@ The implementation matches a bulk synchronous parallel (BSP) design:
   This corresponds to `bias, x1, x2`
 - Worker sample capacity: fixed at `100` rows per worker in [`src/worker.c`](/home/brozed/CSC209_A3-project/src/worker.c)
 
+### Architecture Diagram
+
+![Distributed logistic regression architecture](docs/architecture-diagram.svg)
+
+The diagram is also available directly at [`docs/architecture-diagram.svg`](/home/brozed/CSC209_A3-project/docs/architecture-diagram.svg).
+
 ## Repository Layout
 
 - [`Makefile`](/home/brozed/CSC209_A3-project/Makefile): build rules for `server`, `worker`, and `test_model`
